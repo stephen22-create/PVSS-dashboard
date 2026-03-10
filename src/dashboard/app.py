@@ -6,28 +6,79 @@ import requests
 import os
 from io import StringIO
 from datetime import datetime
+import networkx as nx
+from pyvis.network import Network
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="PVSS Dashboard", layout="wide")
 st.title("🔍 Point Vulnerability System Security (PVSS)")
 st.markdown("Threat‑informed, context‑aware vulnerability prioritization")
 
 # ------------------------------
-# Load and prepare data
+# Load scored data with fallback
 # ------------------------------
 @st.cache_data
 def load_data():
-    with open("data/scored/scored_vulns.json", "r") as f:
-        data = json.load(f)
-    return data
+    try:
+        with open("data/scored/scored_vulns.json", "r") as f:
+            data = json.load(f)
+        return pd.DataFrame(data)
+    except FileNotFoundError:
+        # Generate a default synthetic dataset for demonstration
+        st.warning("No data file found. Using synthetic demo data.")
+        np.random.seed(42)  # for reproducibility
+        n_vulns = 50
+        cves = [f"CVE-2025-{i:04d}" for i in range(1000, 1000 + n_vulns)]
+        asset_ips = ["192.168.1.100", "192.168.1.101", "10.0.0.50", "10.0.0.51",
+                     "172.16.1.10", "172.16.1.20"]
+        asset_roles = ["domain_controller", "web_server", "database_server",
+                       "workstation", "test_lab", "unknown"]
+        exploit_multipliers = [1.0, 1.5, 2.0]
+        data = []
+        for i in range(n_vulns):
+            ip = np.random.choice(asset_ips)
+            role = np.random.choice(asset_roles)
+            # ensure consistency: if asset_role is unknown, pick a random role
+            if role == "unknown":
+                role = np.random.choice(asset_roles[:-1])
+            data.append({
+                "cve_id": cves[i],
+                "name": f"Vulnerability {i}",
+                "asset_ip": ip,
+                "asset_role": role,
+                "cvss_score": round(np.random.uniform(5.0, 10.0), 1),
+                "exploit_multiplier": np.random.choice(exploit_multipliers),
+                "pvs": None,  # will compute below
+                "first_seen": pd.Timestamp.now() - pd.Timedelta(days=np.random.randint(0, 365)),
+                "status": np.random.choice(["Open", "In Progress", "Resolved"]),
+                "in_kev": np.random.choice([True, False], p=[0.2, 0.8]),
+                "solution": "Apply vendor patch",
+                "description": "Sample vulnerability description"
+            })
+        df = pd.DataFrame(data)
+        # Compute PVS based on formula (simplified for demo)
+        # criticality factor (placeholder)
+        criticality_map = {
+            'domain_controller': 1.8,
+            'web_server': 1.2,
+            'database_server': 1.2,
+            'workstation': 0.8,
+            'test_lab': 0.4,
+            'unknown': 1.0
+        }
+        df['asset_criticality'] = df['asset_role'].map(criticality_map).fillna(1.0)
+        df['pvs'] = df['cvss_score'] * df['exploit_multiplier'] * df['asset_criticality']
+        # Ensure first_seen is datetime
+        df['first_seen'] = pd.to_datetime(df['first_seen'])
+        return df
 
-data = load_data()
-df = pd.DataFrame(data)
+df = load_data()
 
 # Add status column if not present (for remediation tracking)
 if 'status' not in df.columns:
     df['status'] = 'Open'
 
-# Ensure a date column exists (for trends)
+# Ensure a date column exists (for trends) – already done, but double-check
 if 'first_seen' not in df.columns:
     start = pd.Timestamp('2025-01-01')
     end = pd.Timestamp('2026-02-01')
@@ -67,6 +118,70 @@ def get_kev_set():
 
 kev_set = get_kev_set()
 df['in_kev'] = df['cve_id'].apply(lambda x: x in kev_set)
+
+# ------------------------------
+# Attack graph function
+# ------------------------------
+def create_attack_graph(graph_df, pvs_threshold=0):
+    """
+    Generate an interactive network graph of assets and vulnerabilities.
+    Only vulnerabilities with PVS >= pvs_threshold are included.
+    """
+    # Filter by PVS threshold
+    filtered = graph_df[graph_df['pvs'] >= pvs_threshold].copy()
+    if filtered.empty:
+        return None
+
+    # Create a pyvis network
+    net = Network(height='600px', width='100%', bgcolor='#222222', font_color='white')
+
+    # Define color maps
+    asset_color_map = {
+        'domain_controller': '#ff4d4d',  # red
+        'pci_data': '#ff944d',            # orange
+        'phi_data': '#ff944d',            # orange
+        'database_server': '#ffaa00',      # gold
+        'web_server': '#66b3ff',           # light blue
+        'default': '#add8e6'               # default blue
+    }
+    exploit_color_map = {
+        2.0: '#ff0000',    # red – active exploit
+        1.5: '#ffa500',    # orange – PoC available
+        1.0: '#00ff00'     # green – no known exploit
+    }
+
+    # Add asset nodes
+    assets = filtered['asset_ip'].unique()
+    for asset in assets:
+        role = filtered[filtered['asset_ip'] == asset]['asset_role'].iloc[0]
+        color = asset_color_map.get(role, asset_color_map['default'])
+        net.add_node(asset, label=asset, color=color, title=f"Role: {role}", shape='box')
+
+    # Add vulnerability nodes and edges
+    for _, row in filtered.iterrows():
+        vuln_id = f"{row['cve_id']} on {row['asset_ip']}"
+        label = row['cve_id'][:15] + '...' if len(row['cve_id']) > 15 else row['cve_id']
+        exploit = row['exploit_multiplier']
+        color = exploit_color_map.get(exploit, '#888888')
+        net.add_node(vuln_id, label=label, color=color, title=f"PVS: {row['pvs']:.2f}", shape='dot')
+        net.add_edge(row['asset_ip'], vuln_id, value=row['pvs'], title=f"PVS: {row['pvs']:.2f}")
+
+    # Set physics for better layout
+    net.set_options("""
+    var options = {
+      "physics": {
+        "enabled": true,
+        "barnesHut": {
+          "gravitationalConstant": -8000,
+          "centralGravity": 0.3,
+          "springLength": 95,
+          "springConstant": 0.04,
+          "damping": 0.09
+        }
+      }
+    }
+    """)
+    return net
 
 # ------------------------------
 # Sidebar filters
@@ -115,9 +230,9 @@ st.sidebar.download_button(
 )
 
 # ------------------------------
-# Main dashboard with tabs (now 4 tabs)
+# Main dashboard with tabs (now 5 tabs)
 # ------------------------------
-tab1, tab2, tab3, tab4 = st.tabs(["🏆 Leaderboard", "📌 Asset View", "📊 Analysis", "🛠️ Remediation"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["🏆 Leaderboard", "📌 Asset View", "📊 Analysis", "🛠️ Remediation", "🔗 Attack Graph"])
 
 # ---------- Tab 1: Leaderboard ----------
 with tab1:
@@ -196,7 +311,6 @@ with tab4:
     st.subheader("🛠️ Remediation Tracking")
     st.markdown("Update the status of vulnerabilities below. Changes are saved to the JSON file.")
 
-    # Use filtered_df for the editor (so users see only the filtered set)
     display_cols = ['cve_id', 'name', 'asset_ip', 'pvs', 'asset_role', 'status']
     editable_df = filtered_df[display_cols].copy()
 
@@ -223,3 +337,31 @@ with tab4:
         df.to_json("data/scored/scored_vulns.json", orient="records", indent=2)
         st.success("Statuses saved successfully!")
         st.rerun()
+
+# ---------- Tab 5: Attack Graph ----------
+with tab5:
+    st.subheader("🔗 Attack Path Visualisation")
+    st.markdown("Interactive graph showing connections between assets and vulnerabilities.")
+
+    if filtered_df.empty:
+        st.warning("No data matches the current filters.")
+    else:
+        # Slider to filter by minimum PVS
+        min_pvs = st.slider("Minimum PVS to display", 
+                            min_value=0.0, 
+                            max_value=float(filtered_df['pvs'].max()), 
+                            value=20.0, 
+                            step=5.0)
+
+        if st.button("Generate Attack Graph"):
+            with st.spinner("Building graph... (may take a moment for large datasets)"):
+                net = create_attack_graph(filtered_df, pvs_threshold=min_pvs)
+                if net is None:
+                    st.info(f"No vulnerabilities with PVS >= {min_pvs}.")
+                else:
+                    # Save the graph to an HTML file
+                    net.save_graph('attack_graph.html')
+                    # Read and display the HTML
+                    with open('attack_graph.html', 'r', encoding='utf-8') as f:
+                        html_content = f.read()
+                    components.html(html_content, height=600)
