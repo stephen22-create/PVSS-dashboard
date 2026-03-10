@@ -1,0 +1,3 @@
+Plugin ID,CVE,CVSS,Risk,Host,Protocol,Port,Name,Synopsis,Description,Solution,First Discovered,Last Discovered
+12345,CVE-2025-1234,9.8,Critical,192.168.1.100,tcp,443,Apache Vulnerability,Remote code execution in Apache,Description here,Upgrade Apache,2026-01-15,2026-02-20
+67890,CVE-2026-0222,8.2,High,10.0.0.50,tcp,22,OpenSSH Vulnerability,Weak key exchange,Description,Update OpenSSH,2026-02-01,2026-02-21

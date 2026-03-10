@@ -1,0 +1,5 @@
+asset_ip,role,is_internet_facing,is_isolated,data_sensitivity
+192.168.1.100,domain_controller,TRUE,FALSE,"pci,phi"
+10.0.0.50,test_lab,FALSE,TRUE,""
+192.168.1.101,web_server,TRUE,FALSE,""
+10.0.0.51,database_server,FALSE,FALSE,"pci"
