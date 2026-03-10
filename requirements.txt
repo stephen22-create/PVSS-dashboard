@@ -36,3 +36,5 @@ typing_extensions @ file:///C:/Users/stephen/PVSS/typing_extensions-4.15.0-py3-n
 tzdata @ file:///C:/Users/stephen/PVSS/tzdata-2025.3-py2.py3-none-any.whl#sha256=06a47e5700f3081aab02b2e513160914ff0694bce9947d6b76ebd6bf57cfc5d1
 urllib3==2.6.3
 watchdog @ file:///C:/Users/stephen/PVSS/watchdog-6.0.0-py3-none-win_amd64.whl#sha256=cbafb470cf848d93b5d013e2ecb245d4aa1c8fd0504e863ccefa32445359d680
+pyvis 
+networkx 
