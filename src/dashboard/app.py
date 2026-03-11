@@ -15,64 +15,75 @@ st.title("🔍 Point Vulnerability System Security (PVSS)")
 st.markdown("Threat‑informed, context‑aware vulnerability prioritization")
 
 # ------------------------------
-# Load scored data with fallback
+# Data loading with file uploader
 # ------------------------------
-@st.cache_data
-def load_data():
-    try:
-        with open("data/scored/scored_vulns.json", "r") as f:
-            data = json.load(f)
-        return pd.DataFrame(data)
-    except FileNotFoundError:
-        # Generate a default synthetic dataset for demonstration
-        st.warning("No data file found. Using synthetic demo data.")
-        np.random.seed(42)  # for reproducibility
-        n_vulns = 50
-        cves = [f"CVE-2025-{i:04d}" for i in range(1000, 1000 + n_vulns)]
-        asset_ips = ["192.168.1.100", "192.168.1.101", "10.0.0.50", "10.0.0.51",
-                     "172.16.1.10", "172.16.1.20"]
-        asset_roles = ["domain_controller", "web_server", "database_server",
-                       "workstation", "test_lab", "unknown"]
-        exploit_multipliers = [1.0, 1.5, 2.0]
-        data = []
-        for i in range(n_vulns):
-            ip = np.random.choice(asset_ips)
-            role = np.random.choice(asset_roles)
-            # ensure consistency: if asset_role is unknown, pick a random role
-            if role == "unknown":
-                role = np.random.choice(asset_roles[:-1])
-            data.append({
-                "cve_id": cves[i],
-                "name": f"Vulnerability {i}",
-                "asset_ip": ip,
-                "asset_role": role,
-                "cvss_score": round(np.random.uniform(5.0, 10.0), 1),
-                "exploit_multiplier": np.random.choice(exploit_multipliers),
-                "pvs": None,  # will compute below
-                "first_seen": pd.Timestamp.now() - pd.Timedelta(days=np.random.randint(0, 365)),
-                "status": np.random.choice(["Open", "In Progress", "Resolved"]),
-                "in_kev": np.random.choice([True, False], p=[0.2, 0.8]),
-                "solution": "Apply vendor patch",
-                "description": "Sample vulnerability description"
-            })
-        df = pd.DataFrame(data)
-        # Compute PVS based on formula (simplified for demo)
-        # criticality factor (placeholder)
-        criticality_map = {
-            'domain_controller': 1.8,
-            'web_server': 1.2,
-            'database_server': 1.2,
-            'workstation': 0.8,
-            'test_lab': 0.4,
-            'unknown': 1.0
-        }
-        df['asset_criticality'] = df['asset_role'].map(criticality_map).fillna(1.0)
-        df['pvs'] = df['cvss_score'] * df['exploit_multiplier'] * df['asset_criticality']
-        # Ensure first_seen is datetime
-        df['first_seen'] = pd.to_datetime(df['first_seen'])
-        return df
+st.sidebar.subheader("📂 Data Source")
 
-df = load_data()
+uploaded_file = st.sidebar.file_uploader("Upload your scored_vulns.json", type=["json"])
+
+@st.cache_data
+def load_data(upload=None):
+    if upload is not None:
+        # User uploaded a file – use it
+        try:
+            data = json.load(upload)
+            df = pd.DataFrame(data)
+            st.sidebar.success("✅ Loaded uploaded file")
+            return df
+        except Exception as e:
+            st.sidebar.error(f"Error reading file: {e}")
+            return pd.DataFrame()
+    else:
+        # No file uploaded – try to load default, or fallback to synthetic
+        try:
+            with open("data/scored/scored_vulns.json", "r") as f:
+                data = json.load(f)
+            df = pd.DataFrame(data)
+            st.sidebar.info("Using default data file")
+            return df
+        except FileNotFoundError:
+            # Generate synthetic demo data
+            st.sidebar.info("No data file – using synthetic demo data")
+            np.random.seed(42)
+            n_vulns = 50
+            cves = [f"CVE-2025-{i:04d}" for i in range(1000, 1000 + n_vulns)]
+            asset_ips = ["192.168.1.100", "192.168.1.101", "10.0.0.50", "10.0.0.51",
+                         "172.16.1.10", "172.16.1.20"]
+            asset_roles = ["domain_controller", "web_server", "database_server",
+                           "workstation", "test_lab"]
+            exploit_multipliers = [1.0, 1.5, 2.0]
+            data = []
+            for i in range(n_vulns):
+                ip = np.random.choice(asset_ips)
+                role = np.random.choice(asset_roles)
+                data.append({
+                    "cve_id": cves[i],
+                    "name": f"Vulnerability {i}",
+                    "asset_ip": ip,
+                    "asset_role": role,
+                    "cvss_score": round(np.random.uniform(5.0, 10.0), 1),
+                    "exploit_multiplier": np.random.choice(exploit_multipliers),
+                    "pvs": None,
+                    "first_seen": pd.Timestamp.now() - pd.Timedelta(days=np.random.randint(0, 365)),
+                    "status": np.random.choice(["Open", "In Progress", "Resolved"]),
+                    "in_kev": np.random.choice([True, False], p=[0.2, 0.8]),
+                    "solution": "Apply vendor patch",
+                    "description": "Sample vulnerability description"
+                })
+            df = pd.DataFrame(data)
+            criticality_map = {
+                'domain_controller': 1.8,
+                'web_server': 1.2,
+                'database_server': 1.2,
+                'workstation': 0.8,
+                'test_lab': 0.4
+            }
+            df['asset_criticality'] = df['asset_role'].map(criticality_map).fillna(1.0)
+            df['pvs'] = df['cvss_score'] * df['exploit_multiplier'] * df['asset_criticality']
+            df['first_seen'] = pd.to_datetime(df['first_seen'])
+            return df
+
+df = load_data(uploaded_file)
 
 # Add status column if not present (for remediation tracking)
 if 'status' not in df.columns:
